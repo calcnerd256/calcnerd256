@@ -271,6 +271,16 @@ function lookupOrDefault(key, dict, fallback){
   )(key, fallback)
  )[key];
 }
+
+function strReplace(source, destination, input){
+ return (""+input).split(source).join(destination);
+}
+function indent(str, indentation, ending){
+ if(arguments.length < 3) ending = "\n";
+ if(arguments.length < 2) indentation = " ";//why not tabs?
+ return indentation + strReplace(ending, ending + indentation, str);
+}
+
 function homoiconicPartialEval(fn, firstFew){
  //warning! This won't work for everything
  return patchOb(
@@ -290,12 +300,36 @@ function homoiconicPartialEval(fn, firstFew){
    someArgs: firstFew,
    maker: arguments.callee,
    toString: function toString(){
-    return "((" + this.maker + ")(" +
-     [
-      this.fn,
-      "[" + this.someArgs.join(", ") + "]"
-     ].join(", ") +
-     "))";
+    return [
+     "(",
+     " (",
+        indent(this.maker, "  "),
+     " )(",
+        indent(this.fn, "  ") + ",",
+     "  [",
+         indent(
+          map(
+           function stringify(x){
+            if("string" == typeof x)
+             return "\"" +
+              strReplace(
+               "\"",
+               "\\\"",
+               strReplace("\\", "\\\\", x)
+              ) +
+              "\"";
+            if(x instanceof Array)
+             return "[" + x + "]";
+            return ""+x;
+           },
+           this.someArgs
+          ).join(",\n"),
+          "   "
+         ),
+     "  ]",
+     " )",
+     ")"
+    ].join("\n");
    }
   }
  );
@@ -395,20 +429,90 @@ function patchFunctions(ob, fns){
  map(function(f){ob[f.name] = f;}, fns);
 }
 
-function strReplace(source, destination, input){
- return (""+input).split(source).join(destination);
-}
-function indent(str, indentation, ending){
- if(arguments.length < 3) ending = "\n";
- if(arguments.length < 2) indentation = " ";//why not tabs?
- return indentation + strReplace(ending, ending + indentation, str);
-}
 function joinLines(lines, ending){
  if(arguments.length < 2) ending = "\n";
  return lines.join(ending);
 }
 
 function I(x){return x;};
+
+
+function biCurry(f){
+ return homoiconicPartialEval(
+  function(f, a){
+   return homoiconicPartialEval(
+    function(f, a, b){
+     return f(a, b);
+    },
+    [f, a]
+   );
+  },
+  [f]
+ );
+}
+function callWithFrom(key, param, ob){
+ return ob[key](param);
+}
+var splitStrOn = homoiconicPartialEval(callWithFrom, ["split"]);
+var joinArrWith = homoiconicPartialEval(callWithFrom, ["join"]);
+function decapitate(arr){
+ var head = arr[0];
+ arr.shift();
+ return [head, arr];
+}
+function compose(g,f){
+ return biCurry(
+  function(fg,x){
+   return fg[0](
+    fg[1](x)
+   );
+  }
+ )(
+  [f,g]
+ );
+}
+function applyIt(f, args){
+ return f.apply(this, args);
+}
+function trimInitialSpace(str){
+ return str.substring(
+  " " == str.charAt(0) ?
+   1 :
+   0
+ );
+}
+function biZip(f, g, x, y){
+ return [f(x), g(y)];
+}
+function buildPatch(key, val){
+ var result = {};
+ result[key] = val;
+ return result;
+}
+function fold(cata, data, initial){
+ var result = initial;
+ map(function(datum){result = cata(result, datum)}, data);
+ return result;
+}
+function composeFns(fns){
+ if(fns.length == 0) return I;
+ if(fns.length == 1) return fns[0];
+ var cell = decapitate(fns);
+ return compose(cell[0], composeFns(cell[1]));
+}
+
+function passIt(f, x){return f(x);};
+var lassoc = function(arr){return fold(passIt, arr, I);}
+var passTo = biCurry(passIt);
+var applyTo = biCurry(applyIt);
+var arrToPatch = applyTo(buildPatch);
+var biZipTo = compose(biCurry(homoiconicPartialEval)(biZip), applyTo);
+var splitOn = biCurry(splitStrOn);
+var applyFold = biCurry(fold)(applyIt);
+
+
+
+
 
 var arrayUtil = [
  keys, map, dumbMap, fancyMap,
@@ -452,6 +556,39 @@ patchOb(
   strReplace: strReplace,
   indent: indent,
   I: I,
-  dumbMap: dumbMap
+  dumbMap: dumbMap,
+  patchFunctions: patchFunctions
+ }
+);
+
+patchFunctions(
+ this,
+ [
+  biCurry,
+  callWithFrom,
+  decapitate,
+  compose,
+  applyIt,
+  trimInitialSpace,
+  biZip,
+  buildPatch,
+  fold,
+  composeFns,
+  passIt
+ ]
+);
+
+patchOb(
+ this,
+ {
+  splitStrOn: splitStrOn,
+  joinArrWith: joinArrWith,
+  lassoc: lassoc,
+  passTo: passTo,
+  applyTo: applyTo,
+  arrToPatch: arrToPatch,
+  biZipTo: biZipTo,
+  splitOn: splitOn,
+  applyFold: applyFold
  }
 );
